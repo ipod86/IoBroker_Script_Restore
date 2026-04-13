@@ -3312,3 +3312,81 @@ window.onload = () => {
     if (window.isShareView) { if (window.hljs) hljs.highlightAll(); return; }
     loadData(); initDragAndDrop(); initTabHandler(); initMentionSystem(); loadDashboard(); loadAllTags().then(() => renderTagFilterBar()); setInterval(checkAndReloadData, 30000); 
 };
+
+// ===== UPDATE =====
+async function openUpdateModal() {
+    document.getElementById('update-modal').style.display = 'flex';
+    document.getElementById('update-log-box').style.display = 'none';
+    document.getElementById('update-log-box').textContent = '';
+    document.getElementById('btn-do-update').disabled = false;
+    document.getElementById('btn-do-update').textContent = 'Update installieren';
+    const info = document.getElementById('update-version-info');
+    info.textContent = 'Prüfe Version...';
+    try {
+        const [cur, lat] = await Promise.all([
+            fetch('/api/version').then(r => r.json()),
+            fetch('/api/latest-version').then(r => r.json())
+        ]);
+        const current = cur.version || '?';
+        const latest = lat.tag_name ? lat.tag_name.replace(/^v/, '') : null;
+        if (!latest) {
+            info.textContent = `Installierte Version: ${current} | GitHub nicht erreichbar`;
+        } else if (latest === current) {
+            info.textContent = `✓ Version ${current} ist aktuell`;
+            document.getElementById('btn-do-update').disabled = true;
+        } else {
+            info.innerHTML = `Installiert: <b>${current}</b> &nbsp;→&nbsp; Verfügbar: <b>${latest}</b>`;
+        }
+    } catch(e) {
+        info.textContent = 'Versionsprüfung fehlgeschlagen';
+    }
+}
+
+async function doUpdate() {
+    if (!confirm('App aktualisieren und neu starten?')) return;
+    const btn = document.getElementById('btn-do-update');
+    const logBox = document.getElementById('update-log-box');
+    btn.disabled = true;
+    btn.textContent = '⏳ Wird aktualisiert...';
+    logBox.style.display = '';
+    logBox.textContent = '';
+
+    try { await fetch('/api/update', { method: 'POST' }); }
+    catch(e) { logBox.textContent = 'Fehler: ' + e.message; btn.disabled = false; btn.textContent = 'Update installieren'; return; }
+
+    let lastLog = '', serverGone = false;
+    const pollIv = setInterval(async () => {
+        try {
+            const d = await fetch('/api/update-log').then(r => r.json());
+            if (d.log !== lastLog) { lastLog = d.log; logBox.textContent = d.log; logBox.scrollTop = logBox.scrollHeight; }
+            if (d.log.includes('=== Update erfolgreich ===') && !serverGone) {
+                serverGone = true; clearInterval(pollIv);
+                btn.textContent = '🔄 Neustart läuft...';
+                waitForRestart();
+            }
+            if (d.log.includes('FEHLER') && !serverGone) {
+                clearInterval(pollIv); btn.disabled = false; btn.textContent = 'Erneut versuchen';
+            }
+        } catch(e) {
+            if (!serverGone) { serverGone = true; clearInterval(pollIv); btn.textContent = '🔄 Neustart läuft...'; waitForRestart(); }
+        }
+    }, 2000);
+
+    function waitForRestart() {
+        logBox.textContent = (lastLog || '') + '\n▸ Warte auf Neustart...';
+        let tries = 0;
+        const checkIv = setInterval(async () => {
+            tries++;
+            try {
+                const r = await fetch('/api/version');
+                if (r.ok) {
+                    clearInterval(checkIv);
+                    btn.textContent = '✓ Abgeschlossen';
+                    logBox.textContent = (lastLog || '') + '\n✓ Server läuft wieder.';
+                    setTimeout(() => location.reload(), 1500);
+                }
+            } catch(e) {}
+            if (tries > 60) clearInterval(checkIv);
+        }, 2000);
+    }
+}

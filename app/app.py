@@ -22,6 +22,8 @@ from datetime import datetime
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
+APP_VERSION = "1.0.0"
+
 app = Flask(__name__)
 
 # Trust exactly one upstream proxy (e.g. nginx/Cloudflare).
@@ -1255,6 +1257,100 @@ def restore_backup():
     finally:
         if file and tar_path and os.path.exists(tar_path):
             os.remove(tar_path)
+
+@app.route('/api/version', methods=['GET'])
+def get_version():
+    return jsonify({"version": APP_VERSION})
+
+@app.route('/api/latest-version', methods=['GET'])
+def get_latest_version():
+    try:
+        r = requests.get(
+            'https://api.github.com/repos/ipod86/Notes/releases/latest',
+            headers={'User-Agent': 'notizen-app'},
+            timeout=5
+        )
+        data = r.json()
+        return jsonify({"tag_name": data.get("tag_name")})
+    except Exception:
+        return jsonify({"tag_name": None})
+
+@app.route('/api/update', methods=['POST'])
+def start_update():
+    import subprocess
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    log_file = os.path.join(app_dir, 'update.log')
+    zip_url = 'https://github.com/ipod86/Notes/archive/refs/heads/main.zip'
+    pid = os.getpid()
+    tmp_zip = f'/tmp/notes-update-{pid}.zip'
+    tmp_dir = f'/tmp/notes-update-{pid}'
+
+    def log(msg):
+        try:
+            with open(log_file, 'a') as f:
+                f.write(msg + '\n')
+        except Exception as e:
+            logger.error(f'[UPDATE] log write failed: {e} | log_file: {log_file}')
+
+    log(f'\n\n=== Update gestartet: {datetime.now().isoformat()} ===')
+
+    script = f"""
+command -v rsync >/dev/null 2>&1 || apt-get install -y rsync -qq
+command -v unzip >/dev/null 2>&1 || apt-get install -y unzip -qq
+echo "▸ Herunterladen..." >> "{log_file}" 2>&1 || true
+wget -q -O "{tmp_zip}" "{zip_url}" || {{ echo "FEHLER: wget gescheitert" >> "{log_file}"; exit 1; }}
+echo "▸ Entpacken..." >> "{log_file}"
+mkdir -p "{tmp_dir}" && unzip -qo "{tmp_zip}" -d "{tmp_dir}" || {{ echo "FEHLER: unzip gescheitert" >> "{log_file}"; exit 1; }}
+echo "▸ Dateien kopieren..." >> "{log_file}"
+rsync -a --exclude=uploads/ --exclude=backups/ --exclude=update.log --exclude='*.db' --exclude='*.sqlite' "{tmp_dir}/Notes-main/app/" "{app_dir}/" || {{ echo "FEHLER: rsync app gescheitert" >> "{log_file}"; exit 1; }}
+rsync -a "{tmp_dir}/Notes-main/static/" "{app_dir}/static/" || {{ echo "FEHLER: rsync static gescheitert" >> "{log_file}"; exit 1; }}
+rsync -a "{tmp_dir}/Notes-main/templates/" "{app_dir}/templates/" || {{ echo "FEHLER: rsync templates gescheitert" >> "{log_file}"; exit 1; }}
+rm -rf "{tmp_zip}" "{tmp_dir}"
+echo "=== Update erfolgreich ===" >> "{log_file}"
+"""
+
+    child = subprocess.Popen(
+        ['bash', '-c', script],
+        stdin=subprocess.DEVNULL,
+        stdout=None,
+        stderr=None,
+        start_new_session=True
+    )
+
+    def watch_log():
+        waited = 0
+        while waited < 180:
+            time.sleep(2)
+            waited += 2
+            try:
+                with open(log_file, 'r') as f:
+                    content = f.read()
+                if '=== Update erfolgreich ===' in content:
+                    log('▸ Neustart...')
+                    time.sleep(0.5)
+                    try:
+                        os.kill(os.getppid(), signal.SIGTERM)
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
+                    os._exit(0)
+            except Exception:
+                pass
+        log('FEHLER: Timeout')
+
+    threading.Thread(target=watch_log, daemon=True).start()
+    return jsonify({"ok": True})
+
+@app.route('/api/update-log', methods=['GET'])
+def get_update_log():
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    log_file = os.path.join(app_dir, 'update.log')
+    try:
+        with open(log_file, 'r') as f:
+            return jsonify({"log": f.read()[-10000:]})
+    except Exception:
+        return jsonify({"log": "Kein Log vorhanden."})
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('FLASK_PORT', 8080))

@@ -78,6 +78,7 @@
                     <div class="submenu-content">
                         <div class="menu-row" onclick="handleMenuAction(event, exportData)"><span><i class="icon icon-export" style="margin-right:8px;"></i> Backup herunterladen</span></div>
                         <div class="menu-row" onclick="handleMenuAction(event, openRestoreModal)"><span><i class="icon icon-restore" style="margin-right:8px;"></i> Wiederherstellen</span></div>
+                        <div class="menu-row" onclick="handleMenuAction(event, openUpdateModal)"><span><i class="icon icon-settings" style="margin-right:8px;"></i> App aktualisieren</span></div>
                     </div>
                 </div>
                 
@@ -324,6 +325,18 @@
                 <div id="upload-progress-bar" style="width:0%; height:20px; background:var(--accent); border-radius:5px; transition:width 0.2s ease;"></div>
             </div>
             <div id="upload-percent" style="margin-top:10px; font-weight:bold;">0%</div>
+        </div>
+    </div>
+
+    <div id="update-modal" class="modal-overlay">
+        <div class="modal" style="width: 520px; max-width: 95vw;">
+            <h3 style="margin-top:0">App aktualisieren</h3>
+            <div id="update-version-info" style="font-size:0.9em; color:#ccc; margin-bottom:15px;">Prüfe Version...</div>
+            <pre id="update-log-box" style="background:#111; color:#ccc; padding:12px; border-radius:6px; font-size:11px; max-height:250px; overflow-y:auto; white-space:pre-wrap; display:none; margin-bottom:15px;"></pre>
+            <div class="modal-btns">
+                <button class="btn-cancel" id="update-modal-close" onclick="document.getElementById('update-modal').style.display='none'">Schließen</button>
+                <button class="btn-save" id="btn-do-update" onclick="doUpdate()">Update installieren</button>
+            </div>
         </div>
     </div>
 
